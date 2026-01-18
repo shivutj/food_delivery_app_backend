@@ -1,9 +1,10 @@
-// routes/analytics.js - OPTIMIZED VERSION
+// routes/analytics.js - FIXED WITH PROPER ROLE-BASED ACCESS
 const express = require("express");
 const router = express.Router();
 const Order = require("../models/Order");
 const User = require("../models/User");
 const Restaurant = require("../models/Restaurant");
+const Menu = require("../models/Menu");
 const authMiddleware = require("../middleware/auth");
 const { logError } = require("../utils/logger");
 
@@ -27,12 +28,19 @@ async function getCachedOrCompute(cacheKey, computeFn) {
   return data;
 }
 
-// ✅ Get analytics (Admin or Restaurant owner)
+// ✅ FIXED: Analytics Dashboard - Role-Based Access
 router.get("/dashboard", authMiddleware, async (req, res) => {
   try {
     const { timeRange = "today" } = req.query;
-    const isAdmin = req.user.role === "admin";
-    const cacheKey = `${req.user.userId}_${timeRange}`;
+    const userRole = req.user.role; // ✅ 'admin', 'restaurant', or 'customer'
+    const userId = req.user.userId;
+    
+    // ✅ Customers cannot access analytics
+    if (userRole === "customer") {
+      return res.status(403).json({ message: "Access denied. Analytics is for restaurant owners and admins only." });
+    }
+
+    const cacheKey = `${userId}_${timeRange}`;
 
     const analytics = await getCachedOrCompute(cacheKey, async () => {
       const now = new Date();
@@ -52,19 +60,37 @@ router.get("/dashboard", authMiddleware, async (req, res) => {
 
       let orders;
       let restaurantName = null;
+      let scope = "all"; // 'all' for admin, 'restaurant' for restaurant owner
 
-      if (!isAdmin) {
-        const restaurant = await Restaurant.findOne({
-          ownerId: req.user.userId,
-        });
+      // ✅ ROLE-BASED DATA FILTERING
+      if (userRole === "admin") {
+        // ✅ ADMIN: See ALL orders
+        orders = await Order.find(orderQuery).lean();
+        scope = "all";
+      } else if (userRole === "restaurant") {
+        // ✅ RESTAURANT: See ONLY THEIR orders
+        const restaurant = await Restaurant.findOne({ ownerId: userId });
 
         if (!restaurant) {
-          return res.status(404).json({ message: "No restaurant found" });
+          return res.status(404).json({ 
+            message: "No restaurant found. Please create a restaurant first.",
+            metrics: {
+              totalOrders: 0,
+              totalRevenue: "0.00",
+              activeUsers: 0,
+            },
+            ordersByStatus: {},
+            chartData: [],
+            timeRange,
+            scope: "restaurant",
+            restaurantName: null,
+          });
         }
 
         restaurantName = restaurant.name;
+        scope = "restaurant";
 
-        const Menu = require("../models/Menu");
+        // ✅ Filter orders by restaurant's menu items
         const restaurantMenuIds = await Menu.find({
           restaurant_id: restaurant._id,
         }).distinct("_id");
@@ -78,19 +104,21 @@ router.get("/dashboard", authMiddleware, async (req, res) => {
           ),
         );
       } else {
-        orders = await Order.find(orderQuery).lean();
+        return res.status(403).json({ message: "Invalid role for analytics access" });
       }
 
+      // ✅ CALCULATE METRICS
       const totalOrders = orders.length;
       const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
-      const activeUsers = [...new Set(orders.map((o) => o.user_id.toString()))]
-        .length;
+      const activeUsers = [...new Set(orders.map((o) => o.user_id.toString()))].length;
 
+      // ✅ Orders by Status
       const ordersByStatus = orders.reduce((acc, order) => {
         acc[order.status] = (acc[order.status] || 0) + 1;
         return acc;
       }, {});
 
+      // ✅ Orders Over Time (for chart)
       const ordersOverTime = orders.reduce((acc, order) => {
         const date = order.createdAt.toISOString().split("T")[0];
         acc[date] = (acc[date] || 0) + 1;
@@ -113,7 +141,8 @@ router.get("/dashboard", authMiddleware, async (req, res) => {
         ordersByStatus,
         chartData,
         timeRange,
-        restaurantName,
+        scope, // 'all' or 'restaurant'
+        restaurantName, // null for admin
       };
     });
 
@@ -124,18 +153,18 @@ router.get("/dashboard", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ Get restaurant performance (Admin only)
+// ✅ FIXED: Restaurant Performance (Admin only)
 router.get("/restaurants", authMiddleware, async (req, res) => {
   try {
+    // ✅ ADMIN ONLY
     if (req.user.role !== "admin") {
-      return res.status(403).json({ message: "Access denied" });
+      return res.status(403).json({ message: "Access denied. Admin only." });
     }
 
     const cacheKey = "restaurant_performance";
 
     const data = await getCachedOrCompute(cacheKey, async () => {
       const restaurants = await Restaurant.find().lean();
-      const Menu = require("../models/Menu");
       const allOrders = await Order.find().lean();
 
       const restaurantStats = await Promise.all(
@@ -181,7 +210,7 @@ router.get("/restaurants", authMiddleware, async (req, res) => {
 router.post("/clear-cache", authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== "admin") {
-      return res.status(403).json({ message: "Access denied" });
+      return res.status(403).json({ message: "Access denied. Admin only." });
     }
 
     analyticsCache.clear();

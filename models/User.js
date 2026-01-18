@@ -1,4 +1,4 @@
-// models/User.js - WITH LOCATION SUPPORT
+// models/User.js - UPDATED WITH 3-ROLE SUPPORT
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
@@ -7,17 +7,26 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     phone: { type: String, required: true, unique: true },
-    role: { type: String, enum: ["customer", "admin"], default: "customer" },
+    
+    // ✅ FIXED: 3 ROLES - admin, restaurant, customer
+    role: { 
+      type: String, 
+      enum: ["customer", "restaurant", "admin"], 
+      default: "customer" 
+    },
+    
     isVerified: { type: Boolean, default: false },
     restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: "Restaurant" },
 
-    // ✅ NEW: User Location
-    location: {
-      address: { type: String },
+    // Profile fields
+    profilePhoto: { type: String },
+    address: {
+      street: { type: String },
       city: { type: String },
+      state: { type: String },
+      pincode: { type: String },
       latitude: { type: Number },
       longitude: { type: Number },
-      type: { type: String, enum: ["home", "recent"], default: "home" },
     },
   },
   { timestamps: true },
