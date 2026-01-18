@@ -151,12 +151,27 @@ router.post("/login", async (req, res) => {
 
     // ✅ Check if user is verified
     if (!user.isVerified) {
-      return res.status(403).json({ 
-        message: "Please verify your account first",
-        userId: user._id,
-        requiresOTP: true
-      });
-    }
+  // Delete old OTPs
+  await OTP.deleteMany({ userId: user._id });
+
+  // Generate new OTP
+  const otpCode = generateOTP();
+  const otp = new OTP({
+    userId: user._id,
+    code: otpCode,
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+  });
+  await otp.save();
+
+  console.log(`📱 OTP for ${user.email}: ${otpCode}`);
+
+  return res.status(403).json({
+    message: "Please verify your account first",
+    userId: user._id,
+    requiresOTP: true,
+    otp: otpCode // ✅ DEMO MODE
+  });
+}
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {

@@ -95,7 +95,7 @@ function getCriticalErrors() {
 function clearCriticalErrors() {
   criticalErrors = [];
 }
-
+ 
 module.exports = {
   logError,
   logInfo,

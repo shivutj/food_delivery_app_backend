@@ -1,17 +1,5 @@
-// models/User.js - ENHANCED VERSION (Compatible with existing code)
+// models/User.js - WITH LOCATION SUPPORT
 const mongoose = require("mongoose");
-
-const addressSchema = new mongoose.Schema(
-  {
-    street: { type: String },
-    city: { type: String },
-    state: { type: String },
-    pincode: { type: String },
-    latitude: { type: Number },
-    longitude: { type: Number },
-  },
-  { _id: false },
-);
 
 const userSchema = new mongoose.Schema(
   {
@@ -22,9 +10,15 @@ const userSchema = new mongoose.Schema(
     role: { type: String, enum: ["customer", "admin"], default: "customer" },
     isVerified: { type: Boolean, default: false },
     restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: "Restaurant" },
-    // NEW FIELDS (backward compatible - optional)
-    profilePhoto: { type: String },
-    address: { type: addressSchema },
+
+    // ✅ NEW: User Location
+    location: {
+      address: { type: String },
+      city: { type: String },
+      latitude: { type: Number },
+      longitude: { type: Number },
+      type: { type: String, enum: ["home", "recent"], default: "home" },
+    },
   },
   { timestamps: true },
 );
