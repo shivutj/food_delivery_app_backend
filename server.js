@@ -15,6 +15,7 @@ const Restaurant = require("./models/Restaurant");
 const authMiddleware = require("./middleware/auth");
 const analyticsRoutes = require("./routes/analytics");
 const app = express();
+const profileRoutes = require("./routes/profile");
 
 // Connect to MongoDB
 connectDB();
@@ -202,6 +203,8 @@ app.delete("/menu/:menuId", authMiddleware, async (req, res) => {
 app.use("/auth", authRoutes);
 app.use("/restaurants", restaurantRoutes);
 app.use("/orders", orderRoutes);
+app.use("/analytics", analyticsRoutes);
+app.use("/profile", profileRoutes);
 
 app.get("/", (req, res) => {
   res.json({ message: "Food Delivery API Running" });
@@ -233,5 +236,3 @@ app.listen(PORT, "0.0.0.0", () => {
 });
 
 // Add these routes to server.js
-
-app.use("/analytics", analyticsRoutes);
