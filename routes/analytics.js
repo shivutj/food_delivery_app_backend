@@ -1,4 +1,4 @@
-// routes/analytics.js - FIXED WITH PROPER ROLE-BASED ACCESS
+// routes/analytics.js - FIXED ACTIVE USERS CALCULATION
 const express = require("express");
 const router = express.Router();
 const Order = require("../models/Order");
@@ -28,14 +28,13 @@ async function getCachedOrCompute(cacheKey, computeFn) {
   return data;
 }
 
-// ✅ FIXED: Analytics Dashboard - Role-Based Access
+// ✅ FIXED: Analytics Dashboard with Correct Active Users
 router.get("/dashboard", authMiddleware, async (req, res) => {
   try {
     const { timeRange = "today" } = req.query;
-    const userRole = req.user.role; // ✅ 'admin', 'restaurant', or 'customer'
+    const userRole = req.user.role;
     const userId = req.user.userId;
     
-    // ✅ Customers cannot access analytics
     if (userRole === "customer") {
       return res.status(403).json({ message: "Access denied. Analytics is for restaurant owners and admins only." });
     }
@@ -60,15 +59,13 @@ router.get("/dashboard", authMiddleware, async (req, res) => {
 
       let orders;
       let restaurantName = null;
-      let scope = "all"; // 'all' for admin, 'restaurant' for restaurant owner
+      let scope = "all";
 
-      // ✅ ROLE-BASED DATA FILTERING
+      // Role-based data filtering
       if (userRole === "admin") {
-        // ✅ ADMIN: See ALL orders
         orders = await Order.find(orderQuery).lean();
         scope = "all";
       } else if (userRole === "restaurant") {
-        // ✅ RESTAURANT: See ONLY THEIR orders
         const restaurant = await Restaurant.findOne({ ownerId: userId });
 
         if (!restaurant) {
@@ -90,7 +87,6 @@ router.get("/dashboard", authMiddleware, async (req, res) => {
         restaurantName = restaurant.name;
         scope = "restaurant";
 
-        // ✅ Filter orders by restaurant's menu items
         const restaurantMenuIds = await Menu.find({
           restaurant_id: restaurant._id,
         }).distinct("_id");
@@ -107,18 +103,24 @@ router.get("/dashboard", authMiddleware, async (req, res) => {
         return res.status(403).json({ message: "Invalid role for analytics access" });
       }
 
-      // ✅ CALCULATE METRICS
+      // ✅ FIXED: Calculate metrics
       const totalOrders = orders.length;
       const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
-      const activeUsers = [...new Set(orders.map((o) => o.user_id.toString()))].length;
+      
+      // ✅ FIXED: Get actual active users from database
+      const uniqueUserIds = [...new Set(orders.map((o) => o.user_id.toString()))];
+      const activeUsersCount = await User.countDocuments({
+        _id: { $in: uniqueUserIds },
+        role: 'customer' // Only count customers
+      });
 
-      // ✅ Orders by Status
+      // Orders by Status
       const ordersByStatus = orders.reduce((acc, order) => {
         acc[order.status] = (acc[order.status] || 0) + 1;
         return acc;
       }, {});
 
-      // ✅ Orders Over Time (for chart)
+      // Orders Over Time
       const ordersOverTime = orders.reduce((acc, order) => {
         const date = order.createdAt.toISOString().split("T")[0];
         acc[date] = (acc[date] || 0) + 1;
@@ -136,13 +138,13 @@ router.get("/dashboard", authMiddleware, async (req, res) => {
         metrics: {
           totalOrders,
           totalRevenue: totalRevenue.toFixed(2),
-          activeUsers,
+          activeUsers: activeUsersCount, // ✅ FIXED: Real count from database
         },
         ordersByStatus,
         chartData,
         timeRange,
-        scope, // 'all' or 'restaurant'
-        restaurantName, // null for admin
+        scope,
+        restaurantName,
       };
     });
 
@@ -153,10 +155,9 @@ router.get("/dashboard", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ FIXED: Restaurant Performance (Admin only)
+// Restaurant Performance (Admin only)
 router.get("/restaurants", authMiddleware, async (req, res) => {
   try {
-    // ✅ ADMIN ONLY
     if (req.user.role !== "admin") {
       return res.status(403).json({ message: "Access denied. Admin only." });
     }
@@ -206,7 +207,7 @@ router.get("/restaurants", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ Clear cache (Admin only)
+// Clear cache (Admin only)
 router.post("/clear-cache", authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== "admin") {
