@@ -6,7 +6,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const connectDB = require("./config/db");
-
+const paymentRoutes = require("./routes/payments");
 const authRoutes = require("./routes/auth");
 const restaurantRoutes = require("./routes/restaurants");
 const orderRoutes = require("./routes/orders");
@@ -246,11 +246,9 @@ app.put("/api/menu/:id", authMiddleware, async (req, res) => {
 
     // Verify ownership
     if (menuItem.restaurant_id.ownerId.toString() !== req.user.userId) {
-      return res
-        .status(403)
-        .json({
-          message: "You can only update items from your own restaurant",
-        });
+      return res.status(403).json({
+        message: "You can only update items from your own restaurant",
+      });
     }
 
     const {
@@ -301,11 +299,9 @@ app.delete("/menu/:menuId", authMiddleware, async (req, res) => {
 
     // Verify ownership
     if (menuItem.restaurant_id.ownerId.toString() !== req.user.userId) {
-      return res
-        .status(403)
-        .json({
-          message: "You can only delete items from your own restaurant",
-        });
+      return res.status(403).json({
+        message: "You can only delete items from your own restaurant",
+      });
     }
 
     await Menu.findByIdAndDelete(req.params.menuId);
@@ -343,12 +339,10 @@ app.put("/api/restaurants/:id/image", authMiddleware, async (req, res) => {
     res.json(restaurant);
   } catch (error) {
     console.error("❌ Update restaurant image error:", error);
-    res
-      .status(500)
-      .json({
-        message: "Failed to update restaurant image",
-        error: error.message,
-      });
+    res.status(500).json({
+      message: "Failed to update restaurant image",
+      error: error.message,
+    });
   }
 });
 
@@ -358,6 +352,7 @@ app.use("/restaurants", restaurantRoutes);
 app.use("/orders", orderRoutes);
 app.use("/analytics", analyticsRoutes);
 app.use("/profile", profileRoutes);
+app.use("/payments", paymentRoutes);
 
 app.get("/", (req, res) => {
   res.json({ message: "Food Delivery API Running" });
@@ -367,11 +362,9 @@ app.get("/", (req, res) => {
 app.use((error, req, res, next) => {
   if (error instanceof multer.MulterError) {
     if (error.code === "LIMIT_FILE_SIZE") {
-      return res
-        .status(400)
-        .json({
-          message: "File size too large. Max 5MB for images, 50MB for videos.",
-        });
+      return res.status(400).json({
+        message: "File size too large. Max 5MB for images, 50MB for videos.",
+      });
     }
     return res.status(400).json({ message: error.message });
   }

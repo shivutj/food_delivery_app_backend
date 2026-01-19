@@ -1,4 +1,4 @@
-// models/User.js - UPDATED WITH 3-ROLE SUPPORT
+// models/User.js - WITH PAN/AADHAAR SUPPORT
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
@@ -7,16 +7,33 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     phone: { type: String, required: true, unique: true },
-    
-    // ✅ FIXED: 3 ROLES - admin, restaurant, customer
-    role: { 
-      type: String, 
-      enum: ["customer", "restaurant", "admin"], 
-      default: "customer" 
+
+    role: {
+      type: String,
+      enum: ["customer", "restaurant", "admin"],
+      default: "customer",
     },
-    
+
     isVerified: { type: Boolean, default: false },
     restaurantId: { type: mongoose.Schema.Types.ObjectId, ref: "Restaurant" },
+
+    // ✅ NEW: ID Verification for Restaurant Owners
+    idVerification: {
+      type: {
+        type: String,
+        enum: ["pan", "aadhaar"],
+      },
+      number: {
+        type: String,
+        unique: true,
+        sparse: true, // Allows null values while maintaining uniqueness
+      },
+      verified: {
+        type: Boolean,
+        default: false,
+      },
+      verifiedAt: Date,
+    },
 
     // Profile fields
     profilePhoto: { type: String },
@@ -31,5 +48,13 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+// ✅ Pre-save validation for restaurant role
+userSchema.pre("save", function (next) {
+  if (this.role === "restaurant" && !this.idVerification?.number) {
+    return next(new Error("ID verification is required for restaurant owners"));
+  }
+  next();
+});
 
 module.exports = mongoose.model("User", userSchema);
