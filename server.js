@@ -1,4 +1,4 @@
-// server.js - COMPLETE WORKING VERSION
+// server.js - COMPLETE WORKING VERSION WITH OPTIMIZATIONS
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
@@ -15,13 +15,21 @@ const profileRoutes = require("./routes/profile");
 const Menu = require("./models/Menu");
 const Restaurant = require("./models/Restaurant");
 const authMiddleware = require("./middleware/auth");
+const dineInBookingsRoutes = require("./routes/dine_in_bookings");
+const compression = require("compression");
+const sharp = require("sharp");
+const helmet = require("helmet");
 
 const app = express();
 
 // Connect to MongoDB
 connectDB();
 
-// CORS - MUST BE FIRST
+// Security & Compression
+app.use(helmet());
+app.use(compression());
+
+// CORS
 app.use(cors());
 app.use(express.json());
 
@@ -34,33 +42,18 @@ if (!fs.existsSync(uploadsDir)) {
 // Serve static files
 app.use("/uploads", express.static(uploadsDir));
 
-// Configure multer for IMAGE uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}${path.extname(file.originalname)}`;
-    cb(null, uniqueName);
-  },
-});
+// Configure multer for IMAGE uploads (memory storage for compression)
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB for images
   fileFilter: (req, file, cb) => {
-    console.log("File filter check:");
-    console.log("- Original name:", file.originalname);
-    console.log("- MIME type:", file.mimetype);
-
     const allowedTypes = /jpeg|jpg|png|gif|webp/i;
     const extname = allowedTypes.test(
       path.extname(file.originalname).toLowerCase(),
     );
     const mimetype = file.mimetype.startsWith("image/");
-
-    console.log("- Extension valid:", extname);
-    console.log("- MIME valid:", mimetype);
 
     if (extname || mimetype) {
       cb(null, true);
@@ -85,18 +78,11 @@ const videoUpload = multer({
   storage: videoStorage,
   limits: { fileSize: 50 * 1024 * 1024 }, // 50MB for videos
   fileFilter: (req, file, cb) => {
-    console.log("Video filter check:");
-    console.log("- Original name:", file.originalname);
-    console.log("- MIME type:", file.mimetype);
-
     const allowedTypes = /mp4|mov|avi|mkv/i;
     const extname = allowedTypes.test(
       path.extname(file.originalname).toLowerCase(),
     );
     const mimetype = file.mimetype.startsWith("video/");
-
-    console.log("- Extension valid:", extname);
-    console.log("- MIME valid:", mimetype);
 
     if (extname || mimetype) {
       cb(null, true);
@@ -106,28 +92,41 @@ const videoUpload = multer({
   },
 });
 
-// ==================== IMAGE UPLOAD ====================
-app.post("/api/upload", authMiddleware, upload.single("image"), (req, res) => {
-  try {
-    console.log("Upload request received");
-    console.log("File:", req.file);
+// ==================== IMAGE UPLOAD WITH COMPRESSION ====================
+app.post(
+  "/api/upload",
+  authMiddleware,
+  upload.single("image"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No image file provided" });
+      }
 
-    if (!req.file) {
-      return res.status(400).json({ message: "No image file provided" });
+      // Compress image to WebP format
+      const compressedBuffer = await sharp(req.file.buffer)
+        .resize(1024, 1024, { fit: "inside", withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toBuffer();
+
+      // Save compressed file
+      const filename = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}.webp`;
+      const filepath = path.join(uploadsDir, filename);
+      await fs.promises.writeFile(filepath, compressedBuffer);
+
+      const baseUrl = process.env.NGROK_URL || `http://192.168.31.100:5001`;
+      const imageUrl = `${baseUrl}/uploads/${filename}`;
+
+      console.log("✅ Image uploaded & compressed:", imageUrl);
+      res.json({ imageUrl });
+    } catch (error) {
+      console.error("Upload error:", error);
+      res
+        .status(500)
+        .json({ message: "Image upload failed", error: error.message });
     }
-
-    const baseUrl = process.env.NGROK_URL || `http://192.168.31.100:5001`;
-    const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
-
-    console.log("✅ Image uploaded:", imageUrl);
-    res.json({ imageUrl });
-  } catch (error) {
-    console.error("Upload error:", error);
-    res
-      .status(500)
-      .json({ message: "Image upload failed", error: error.message });
-  }
-});
+  },
+);
 
 // ==================== VIDEO UPLOAD ====================
 app.post(
@@ -136,9 +135,6 @@ app.post(
   videoUpload.single("video"),
   (req, res) => {
     try {
-      console.log("Video upload request received");
-      console.log("File:", req.file);
-
       if (!req.file) {
         return res.status(400).json({ message: "No video file provided" });
       }
@@ -158,16 +154,9 @@ app.post(
 );
 
 // ==================== MENU ROUTES ====================
-// ✅ ADD MENU ITEM (Restaurant Owner or Admin)
 app.post("/api/menu", authMiddleware, async (req, res) => {
   try {
-    console.log("\n📝 ADD MENU ITEM REQUEST");
-    console.log("   User Role:", req.user.role);
-    console.log("   Data:", req.body);
-
-    // ✅ FIXED: Allow both 'restaurant' and 'admin' roles
     if (req.user.role !== "restaurant" && req.user.role !== "admin") {
-      console.log("❌ Access denied for role:", req.user.role);
       return res.status(403).json({ message: "Access denied" });
     }
 
@@ -183,30 +172,21 @@ app.post("/api/menu", authMiddleware, async (req, res) => {
       video,
     } = req.body;
 
-    // ✅ Verify the restaurant belongs to this user
     const restaurant = await Restaurant.findById(restaurant_id);
     if (!restaurant) {
-      console.log("❌ Restaurant not found:", restaurant_id);
       return res.status(404).json({ message: "Restaurant not found" });
     }
 
     if (restaurant.ownerId.toString() !== req.user.userId) {
-      console.log(
-        "❌ Not owner. Restaurant owner:",
-        restaurant.ownerId,
-        "User:",
-        req.user.userId,
-      );
       return res
         .status(403)
         .json({ message: "You can only add items to your own restaurant" });
     }
 
-    // ✅ Create menu item
     const newMenuItem = new Menu({
       restaurant_id,
       name,
-      price: parseInt(price), // Ensure integer
+      price: parseInt(price),
       image: image || "https://via.placeholder.com/150",
       video: video || undefined,
       category: category || "Main Course",
@@ -226,13 +206,8 @@ app.post("/api/menu", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ UPDATE MENU ITEM
 app.put("/api/menu/:id", authMiddleware, async (req, res) => {
   try {
-    console.log("\n✏️ UPDATE MENU ITEM REQUEST");
-    console.log("   Menu ID:", req.params.id);
-    console.log("   User Role:", req.user.role);
-
     if (req.user.role !== "restaurant" && req.user.role !== "admin") {
       return res.status(403).json({ message: "Access denied" });
     }
@@ -244,11 +219,12 @@ app.put("/api/menu/:id", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Menu item not found" });
     }
 
-    // Verify ownership
     if (menuItem.restaurant_id.ownerId.toString() !== req.user.userId) {
-      return res.status(403).json({
-        message: "You can only update items from your own restaurant",
-      });
+      return res
+        .status(403)
+        .json({
+          message: "You can only update items from your own restaurant",
+        });
     }
 
     const {
@@ -262,7 +238,6 @@ app.put("/api/menu/:id", authMiddleware, async (req, res) => {
       video,
     } = req.body;
 
-    // Update fields
     if (name) menuItem.name = name;
     if (price) menuItem.price = parseInt(price);
     if (image) menuItem.image = image;
@@ -283,7 +258,6 @@ app.put("/api/menu/:id", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ DELETE MENU ITEM
 app.delete("/menu/:menuId", authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== "restaurant" && req.user.role !== "admin") {
@@ -297,11 +271,12 @@ app.delete("/menu/:menuId", authMiddleware, async (req, res) => {
       return res.status(404).json({ message: "Menu item not found" });
     }
 
-    // Verify ownership
     if (menuItem.restaurant_id.ownerId.toString() !== req.user.userId) {
-      return res.status(403).json({
-        message: "You can only delete items from your own restaurant",
-      });
+      return res
+        .status(403)
+        .json({
+          message: "You can only delete items from your own restaurant",
+        });
     }
 
     await Menu.findByIdAndDelete(req.params.menuId);
@@ -313,7 +288,6 @@ app.delete("/menu/:menuId", authMiddleware, async (req, res) => {
   }
 });
 
-// ✅ UPDATE RESTAURANT IMAGE
 app.put("/api/restaurants/:id/image", authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== "restaurant" && req.user.role !== "admin") {
@@ -339,10 +313,12 @@ app.put("/api/restaurants/:id/image", authMiddleware, async (req, res) => {
     res.json(restaurant);
   } catch (error) {
     console.error("❌ Update restaurant image error:", error);
-    res.status(500).json({
-      message: "Failed to update restaurant image",
-      error: error.message,
-    });
+    res
+      .status(500)
+      .json({
+        message: "Failed to update restaurant image",
+        error: error.message,
+      });
   }
 });
 
@@ -353,6 +329,7 @@ app.use("/orders", orderRoutes);
 app.use("/analytics", analyticsRoutes);
 app.use("/profile", profileRoutes);
 app.use("/payments", paymentRoutes);
+app.use("/dine-in-bookings", dineInBookingsRoutes);
 
 app.get("/", (req, res) => {
   res.json({ message: "Food Delivery API Running" });
