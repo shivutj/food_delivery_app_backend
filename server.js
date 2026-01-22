@@ -10,7 +10,7 @@ const compression = require("compression");
 const sharp = require("sharp");
 const helmet = require("helmet");
 
-// Import Routes
+// Import Routes - DECLARE EACH ONLY ONCE
 const paymentRoutes = require("./routes/payments");
 const authRoutes = require("./routes/auth");
 const restaurantRoutes = require("./routes/restaurants");
@@ -18,8 +18,8 @@ const orderRoutes = require("./routes/orders");
 const analyticsRoutes = require("./routes/analytics");
 const profileRoutes = require("./routes/profile");
 const dineInBookingsRoutes = require("./routes/dine_in_bookings");
-const reviewRoutes = require("./routes/reviews");
-const adminReviewRoutes = require("./routes/admin_reviews");
+const reviewRoutes = require("./routes/reviews"); // ✅ Only declared once
+const adminReviewRoutes = require("./routes/admin_reviews"); // ✅ Only declared once
 
 // Import Models
 const Menu = require("./models/Menu");
@@ -330,8 +330,8 @@ app.use("/analytics", analyticsRoutes);
 app.use("/profile", profileRoutes);
 app.use("/payments", paymentRoutes);
 app.use("/dine-in-bookings", dineInBookingsRoutes);
-app.use("/reviews", reviewRoutes); // ✅ NEW: Review routes
-app.use("/admin/reviews", adminReviewRoutes); // ✅ NEW: Admin review routes
+app.use("/reviews", reviewRoutes); // ✅ Review routes
+app.use("/admin/reviews", adminReviewRoutes); // ✅ Admin review routes
 
 app.get("/", (req, res) => {
   res.json({ message: "Food Delivery API Running" });

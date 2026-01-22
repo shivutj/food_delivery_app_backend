@@ -281,4 +281,64 @@ router.delete("/menu/:menuId", authMiddleware, async (req, res) => {
   }
 });
 
+
+
+// ✅ RESTAURANT RANKING UPDATE (System-wide, auto-calculated)
+router.get("/rankings", async (req, res) => {
+  try {
+    const Review = require("../models/Review");
+
+    // ✅ Calculate ranking for each restaurant
+    const restaurantRankings = await Review.aggregate([
+      { $match: { status: "active" } },
+      {
+        $group: {
+          _id: "$restaurant_id",
+          total_impact: { $sum: "$ranking_impact" }, // +1 for thumbs_up, -1 for thumbs_down
+          thumbs_up_count: {
+            $sum: { $cond: [{ $eq: ["$emoji_sentiment", "thumbs_up"] }, 1, 0] },
+          },
+          thumbs_down_count: {
+            $sum: { $cond: [{ $eq: ["$emoji_sentiment", "thumbs_down"] }, 1, 0] },
+          },
+          avg_rating: { $avg: "$rating" },
+          avg_trust_score: { $avg: "$trust_score" },
+          review_count: { $sum: 1 },
+        },
+      },
+      { $sort: { total_impact: -1 } }, // Highest impact first
+    ]);
+
+    // Populate restaurant names
+    const rankedRestaurants = await Promise.all(
+      restaurantRankings.map(async (r) => {
+        const restaurant = await Restaurant.findById(r._id);
+        return {
+          id: r._id,
+          name: restaurant?.name || "Unknown",
+          image: restaurant?.image,
+          ranking_score: r.total_impact,
+          thumbs_up: r.thumbs_up_count,
+          thumbs_down: r.thumbs_down_count,
+          avg_rating: r.avg_rating.toFixed(1),
+          avg_trust_score: r.avg_trust_score.toFixed(1),
+          total_reviews: r.review_count,
+          positive_ratio:
+            ((r.thumbs_up_count / (r.thumbs_up_count + r.thumbs_down_count)) * 100).toFixed(1) + "%",
+        };
+      })
+    );
+
+    res.json({
+      rankings: rankedRestaurants,
+      total: rankedRestaurants.length,
+    });
+  } catch (error) {
+    console.error("Get restaurant rankings error:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+});
+
+
+
 module.exports = router;
