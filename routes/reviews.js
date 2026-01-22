@@ -1,4 +1,4 @@
-// routes/reviews.js - COMPLETE GENUINE REVIEW SYSTEM
+// routes/reviews.js - FIXED VERSION (1 MIN DELAY + WALLET INTEGRATION)
 const express = require("express");
 const router = express.Router();
 const Review = require("../models/Review");
@@ -6,6 +6,7 @@ const ReviewerProfile = require("../models/ReviewerProfile");
 const ReviewFeedback = require("../models/ReviewFeedback");
 const ReviewReward = require("../models/ReviewReward");
 const ReviewAuditLog = require("../models/ReviewAuditLog");
+const Wallet = require("../models/Wallet"); // ✅ NEW
 const Order = require("../models/Order");
 const User = require("../models/User");
 const Menu = require("../models/Menu");
@@ -13,68 +14,38 @@ const authMiddleware = require("../middleware/auth");
 
 // ✅ HELPER: Calculate Trust Score
 function calculateTrustScore(user, order, reviewerProfile, reviewText) {
-  let score = 50; // Base score
-
-  // Account age (max +15)
+  let score = 50;
   if (reviewerProfile) {
     const accountAgeDays = reviewerProfile.account_age_days;
     score += Math.min(accountAgeDays / 10, 15);
   }
-
-  // Order history (max +15)
   if (reviewerProfile && reviewerProfile.total_orders > 0) {
     score += Math.min(reviewerProfile.total_orders * 2, 15);
   }
-
-  // Review quality (max +10)
   if (reviewerProfile && reviewerProfile.avg_trust_score > 50) {
     score += Math.min((reviewerProfile.avg_trust_score - 50) / 5, 10);
   }
-
-  // Verified contact (max +10)
   if (reviewerProfile) {
     if (reviewerProfile.verified_mobile) score += 5;
     if (reviewerProfile.verified_email) score += 5;
   }
-
-  // Review text quality (max +10)
   const wordCount = reviewText.split(/\s+/).length;
   if (wordCount >= 50) score += 10;
   else if (wordCount >= 30) score += 5;
-
   return Math.min(Math.round(score), 100);
 }
 
 // ✅ HELPER: Assign Review Labels
 function assignReviewLabels(reviewerProfile, isFirstReview, trustScore) {
   const labels = ["verified_order"];
-
-  if (isFirstReview) {
-    labels.push("first_review");
-  }
-
+  if (isFirstReview) labels.push("first_review");
   if (reviewerProfile) {
-    if (reviewerProfile.total_reviews >= 10) {
-      labels.push("frequent_customer");
-    }
-
-    if (
-      reviewerProfile.reviewer_level === "gold" ||
-      reviewerProfile.reviewer_level === "platinum" ||
-      reviewerProfile.reviewer_level === "elite"
-    ) {
+    if (reviewerProfile.total_reviews >= 10) labels.push("frequent_customer");
+    if (["gold", "platinum", "elite"].includes(reviewerProfile.reviewer_level))
       labels.push("trusted_reviewer");
-    }
-
-    if (reviewerProfile.total_orders >= 20) {
-      labels.push("high_value_customer");
-    }
+    if (reviewerProfile.total_orders >= 20) labels.push("high_value_customer");
   }
-
-  if (trustScore < 40) {
-    labels.push("low_confidence");
-  }
-
+  if (trustScore < 40) labels.push("low_confidence");
   return labels;
 }
 
@@ -103,19 +74,13 @@ async function logAudit(reviewId, actionType, performedBy, details, req) {
 router.get("/eligibility/:orderId", authMiddleware, async (req, res) => {
   try {
     const { orderId } = req.params;
-    const startTime = Date.now();
-
     const order = await Order.findById(orderId);
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
-
-    // ✅ Check ownership
     if (order.user_id.toString() !== req.user.userId) {
       return res.status(403).json({ message: "Not your order" });
     }
-
-    // ✅ Check if already reviewed
     const existingReview = await Review.findOne({ order_id: orderId });
     if (existingReview) {
       return res.json({
@@ -124,8 +89,6 @@ router.get("/eligibility/:orderId", authMiddleware, async (req, res) => {
         message: "You have already reviewed this order",
       });
     }
-
-    // ✅ Check order status
     if (order.status !== "Delivered") {
       return res.json({
         eligible: false,
@@ -134,31 +97,28 @@ router.get("/eligibility/:orderId", authMiddleware, async (req, res) => {
       });
     }
 
-    // ✅ Check 30-minute delay
+    // ✅ CHANGED: 1 MINUTE DELAY (was 30 minutes)
     const deliveryTime = order.updatedAt;
-    const minReviewTime = new Date(deliveryTime.getTime() + 30 * 60 * 1000);
+    const minReviewTime = new Date(deliveryTime.getTime() + 1 * 60 * 1000); // 1 min
 
     if (new Date() < minReviewTime) {
-      const remainingMinutes = Math.ceil((minReviewTime - new Date()) / 60000);
+      const remainingSeconds = Math.ceil((minReviewTime - new Date()) / 1000);
       return res.json({
         eligible: false,
         reason: "too_soon",
-        message: `Please wait ${remainingMinutes} more minutes after delivery`,
-        minutes_remaining: remainingMinutes,
+        message: `Please wait ${remainingSeconds} more seconds after delivery`,
+        seconds_remaining: remainingSeconds,
       });
     }
 
-    // ✅ Check if reviewer is banned
     const reviewerProfile = await ReviewerProfile.findOne({
       user_id: req.user.userId,
     });
-
     if (reviewerProfile?.is_banned) {
       if (
         reviewerProfile.ban_expires_at &&
         new Date() > reviewerProfile.ban_expires_at
       ) {
-        // Unban
         reviewerProfile.is_banned = false;
         reviewerProfile.ban_reason = null;
         reviewerProfile.ban_expires_at = null;
@@ -172,8 +132,6 @@ router.get("/eligibility/:orderId", authMiddleware, async (req, res) => {
         });
       }
     }
-
-    // ✅ Check mobile verification
     const user = await User.findById(req.user.userId);
     if (!user.isVerified) {
       return res.json({
@@ -182,9 +140,6 @@ router.get("/eligibility/:orderId", authMiddleware, async (req, res) => {
         message: "Please verify your mobile number to submit reviews",
       });
     }
-
-    const elapsed = Date.now() - startTime;
-    console.log(`✅ Eligibility check completed in ${elapsed}ms`);
 
     res.json({
       eligible: true,
@@ -199,12 +154,10 @@ router.get("/eligibility/:orderId", authMiddleware, async (req, res) => {
 
 // ==================== SUBMIT REVIEW ====================
 router.post("/", authMiddleware, async (req, res) => {
-  const startTime = Date.now();
-
   try {
     const {
       order_id,
-      emoji_sentiment, // ✅ NEW: thumbs_up or thumbs_down
+      emoji_sentiment,
       rating,
       food_quality_rating,
       delivery_rating,
@@ -212,59 +165,44 @@ router.post("/", authMiddleware, async (req, res) => {
       photos,
     } = req.body;
 
-    console.log(`\n📝 SUBMIT REVIEW REQUEST`);
-    console.log(`   User ID: ${req.user.userId}`);
-    console.log(`   Order ID: ${order_id}`);
-
-    // ✅ 1. Validate emoji sentiment
-    if (
-      !emoji_sentiment ||
-      !["thumbs_up", "thumbs_down"].includes(emoji_sentiment)
-    ) {
+    if (!["thumbs_up", "thumbs_down"].includes(emoji_sentiment)) {
       return res.status(400).json({
         message: "Please select thumbs up or thumbs down",
       });
     }
 
-    // ✅ 2. Validate order
     const order = await Order.findById(order_id);
     if (!order) {
       return res.status(400).json({ message: "Order not found" });
     }
-
     if (order.user_id.toString() !== req.user.userId) {
       return res.status(403).json({ message: "Not your order" });
     }
-
     if (order.status !== "Delivered") {
       return res.status(400).json({ message: "Order not delivered yet" });
     }
 
-    // ✅ 3. Check 30-min delay
+    // ✅ CHANGED: 1-minute delay
     const deliveryTime = order.updatedAt;
-    const minReviewTime = new Date(deliveryTime.getTime() + 30 * 60 * 1000);
-
+    const minReviewTime = new Date(deliveryTime.getTime() + 1 * 60 * 1000);
     if (new Date() < minReviewTime) {
-      const remainingMinutes = Math.ceil((minReviewTime - new Date()) / 60000);
+      const remainingSeconds = Math.ceil((minReviewTime - new Date()) / 1000);
       return res.status(400).json({
-        message: `Please wait ${remainingMinutes} more minutes`,
+        message: `Please wait ${remainingSeconds} more seconds`,
       });
     }
 
-    // ✅ 4. Check duplicate
     const existingReview = await Review.findOne({ order_id });
     if (existingReview) {
       return res.status(400).json({ message: "Already reviewed" });
     }
 
-    // ✅ 5. Validate text length (minimum 80 chars)
     if (!review_text || review_text.trim().length < 80) {
       return res.status(400).json({
         message: "Review must be at least 80 characters",
       });
     }
 
-    // ✅ 6. Get user & profile
     const user = await User.findById(req.user.userId);
     let reviewerProfile = await ReviewerProfile.findOne({
       user_id: req.user.userId,
@@ -280,39 +218,30 @@ router.post("/", authMiddleware, async (req, res) => {
       await reviewerProfile.save();
     }
 
-    // ✅ 7. Calculate trust score
     const trustScore = calculateTrustScore(
       user,
       order,
       reviewerProfile,
       review_text.trim(),
     );
-
-    // ✅ 8. Assign labels
     const isFirstReview = reviewerProfile.total_reviews === 0;
     const labels = assignReviewLabels(
       reviewerProfile,
       isFirstReview,
       trustScore,
     );
-
-    // ✅ 9. Get device & IP
     const deviceFingerprint = req.headers["x-device-fingerprint"] || "unknown";
     const ipAddress = req.ip || req.headers["x-forwarded-for"] || "unknown";
 
-    // ✅ 10. Get restaurant ID
     const restaurantId = order.items[0]?.menu_id
       ? (await Menu.findById(order.items[0].menu_id))?.restaurant_id
       : null;
-
     if (!restaurantId) {
       return res.status(400).json({ message: "Restaurant not found" });
     }
 
-    // ✅ 11. Generate reward
     const coinsReward = generateReward();
 
-    // ✅ 12. Create review
     const review = new Review({
       user_id: req.user.userId,
       restaurant_id: restaurantId,
@@ -330,10 +259,8 @@ router.post("/", authMiddleware, async (req, res) => {
       status: "active",
       coins_rewarded: coinsReward,
     });
-
     await review.save();
 
-    // ✅ 13. Create reward record
     const reward = new ReviewReward({
       user_id: req.user.userId,
       review_id: review._id,
@@ -342,31 +269,38 @@ router.post("/", authMiddleware, async (req, res) => {
       status: "credited",
       credited_at: new Date(),
     });
-
     await reward.save();
 
-    // ✅ 14. Update reviewer profile
+    // ✅ ADD COINS TO WALLET
+    let wallet = await Wallet.findOne({ user_id: req.user.userId });
+    if (!wallet) {
+      wallet = new Wallet({ user_id: req.user.userId });
+    }
+    wallet.balance += coinsReward;
+    wallet.total_earned += coinsReward;
+    wallet.transactions.push({
+      type: "review_reward",
+      amount: coinsReward,
+      description: `Review reward for order #${order_id.substring(order_id.length - 8)}`,
+      reference_id: review._id,
+      timestamp: new Date(),
+    });
+    await wallet.save();
+
     reviewerProfile.total_reviews += 1;
     reviewerProfile.last_review_date = new Date();
     reviewerProfile.total_orders = await Order.countDocuments({
       user_id: req.user.userId,
       status: "Delivered",
     });
-
     reviewerProfile.total_coins_earned += coinsReward;
-
-    // Award points
-    reviewerProfile.addPoints(10); // Base
+    reviewerProfile.addPoints(10);
     if (photos && photos.length > 0) reviewerProfile.addPoints(5);
     if (review_text.length > 200) reviewerProfile.addPoints(3);
-
-    // Track device & IP
     reviewerProfile.trackDevice(deviceFingerprint);
     reviewerProfile.trackIP(ipAddress);
-
     await reviewerProfile.save();
 
-    // ✅ 15. Log audit
     await logAudit(
       review._id,
       "created",
@@ -379,11 +313,6 @@ router.post("/", authMiddleware, async (req, res) => {
       req,
     );
 
-    const elapsed = Date.now() - startTime;
-    console.log(`✅ Review created in ${elapsed}ms`);
-    console.log(`   Trust Score: ${trustScore}`);
-    console.log(`   Coins Rewarded: ${coinsReward}`);
-
     res.status(201).json({
       success: true,
       message: "Review submitted successfully",
@@ -394,6 +323,7 @@ router.post("/", authMiddleware, async (req, res) => {
         labels: review.labels,
         coins_rewarded: coinsReward,
       },
+      wallet_balance: wallet.balance,
     });
   } catch (error) {
     console.error("Submit review error:", error);
@@ -403,8 +333,6 @@ router.post("/", authMiddleware, async (req, res) => {
 
 // ==================== GET RESTAURANT REVIEWS ====================
 router.get("/restaurant/:restaurantId", async (req, res) => {
-  const startTime = Date.now();
-
   try {
     const { restaurantId } = req.params;
     const { sort = "recent", minTrustScore = 0 } = req.query;
@@ -429,7 +357,6 @@ router.get("/restaurant/:restaurantId", async (req, res) => {
       .sort(sortQuery)
       .lean();
 
-    // ✅ Enrich with reviewer profiles (anonymous to public)
     const enrichedReviews = await Promise.all(
       reviews.map(async (review) => {
         const reviewerProfile = await ReviewerProfile.findOne({
@@ -438,20 +365,16 @@ router.get("/restaurant/:restaurantId", async (req, res) => {
 
         return {
           ...review,
-          // ✅ ANONYMOUS: Only show first name + initial
           user_id: {
             _id: review.user_id._id,
             name: `${review.user_id.name.split(" ")[0]} ${review.user_id.name.split(" ")[1]?.[0] || ""}.`,
-            profilePhoto: null, // Hide photo for anonymity
+            profilePhoto: null,
           },
           reviewer_level: reviewerProfile?.reviewer_level || "bronze",
           reviewer_total_reviews: reviewerProfile?.total_reviews || 1,
         };
       }),
     );
-
-    const elapsed = Date.now() - startTime;
-    console.log(`✅ Reviews loaded in ${elapsed}ms`);
 
     res.json({
       reviews: enrichedReviews,
@@ -485,7 +408,6 @@ router.post("/:reviewId/helpful", authMiddleware, async (req, res) => {
       device_fingerprint: req.headers["x-device-fingerprint"] || "unknown",
       ip_address: req.ip,
     });
-
     await feedback.save();
 
     const review = await Review.findById(reviewId);
@@ -551,16 +473,10 @@ router.post("/:reviewId/report", authMiddleware, async (req, res) => {
       reason: reason.trim(),
       timestamp: new Date(),
     });
-
     review.report_count += 1;
 
-    // ✅ Auto-flag if threshold reached (3 reports)
     if (review.report_count >= 3 && review.status === "active") {
       review.status = "flagged";
-      console.log(
-        `⚠️ Review ${reviewId} auto-flagged (${review.report_count} reports)`,
-      );
-
       await logAudit(
         review._id,
         "flagged",
@@ -579,65 +495,6 @@ router.post("/:reviewId/report", authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error("Report review error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
-// ==================== RESTAURANT RESPONSE ====================
-router.post("/:reviewId/respond", authMiddleware, async (req, res) => {
-  try {
-    if (req.user.role !== "restaurant" && req.user.role !== "admin") {
-      return res.status(403).json({ message: "Access denied" });
-    }
-
-    const { reviewId } = req.params;
-    const { response_text } = req.body;
-
-    if (!response_text || response_text.trim().length < 20) {
-      return res.status(400).json({ message: "Response min 20 chars" });
-    }
-
-    const review = await Review.findById(reviewId);
-    if (!review) {
-      return res.status(404).json({ message: "Review not found" });
-    }
-
-    const Restaurant = require("../models/Restaurant");
-    const restaurant = await Restaurant.findOne({
-      _id: review.restaurant_id,
-      ownerId: req.user.userId,
-    });
-
-    if (!restaurant && req.user.role !== "admin") {
-      return res.status(403).json({ message: "Not your restaurant" });
-    }
-
-    if (review.restaurant_response?.text) {
-      return res.status(400).json({ message: "Already responded" });
-    }
-
-    review.restaurant_response = {
-      text: response_text.trim(),
-      responded_at: new Date(),
-      responded_by: req.user.userId,
-    };
-
-    await review.save();
-
-    await logAudit(
-      review._id,
-      "admin_action",
-      { user_id: req.user.userId, role: req.user.role },
-      { action: "restaurant_response" },
-      req,
-    );
-
-    res.json({
-      message: "Response posted",
-      response: review.restaurant_response,
-    });
-  } catch (error) {
-    console.error("Restaurant response error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 });

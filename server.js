@@ -26,6 +26,8 @@ const Menu = require("./models/Menu");
 const Restaurant = require("./models/Restaurant");
 const authMiddleware = require("./middleware/auth");
 
+const walletRoutes = require("./routes/wallets");
+
 const app = express();
 
 // Connect to MongoDB
@@ -332,6 +334,8 @@ app.use("/payments", paymentRoutes);
 app.use("/dine-in-bookings", dineInBookingsRoutes);
 app.use("/reviews", reviewRoutes); // ✅ Review routes
 app.use("/admin/reviews", adminReviewRoutes); // ✅ Admin review routes
+
+app.use("/wallets", walletRoutes);
 
 app.get("/", (req, res) => {
   res.json({ message: "Food Delivery API Running" });
