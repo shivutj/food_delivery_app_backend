@@ -1,4 +1,4 @@
-// routes/auth.js - UPDATED WITH PAN/AADHAAR VERIFICATION
+// routes/auth.js - COMPLETE AUTH ROUTES WITH ADMIN EMAIL VALIDATION
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
@@ -6,6 +6,9 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const OTP = require("../models/OTP");
 const { logError } = require("../utils/logger");
+
+// Admin email constant
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "admin@fooddelivery.com";
 
 // Generate 6-digit OTP
 function generateOTP() {
@@ -28,6 +31,14 @@ function validateAadhaar(aadhaar) {
 router.post("/register", async (req, res) => {
   try {
     const { name, email, password, phone, role, idType, idNumber } = req.body;
+
+    // ✅ ADMIN EMAIL VALIDATION
+    if (role === "admin" && email !== ADMIN_EMAIL) {
+      return res.status(403).json({
+        message:
+          "Invalid admin credentials. Only authorized email can register as admin.",
+      });
+    }
 
     // ✅ Validate phone number
     if (!phone) {
