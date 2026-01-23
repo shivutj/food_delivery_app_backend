@@ -1,4 +1,4 @@
-// routes/orders.js - WITH DELIVERY NOTIFICATION
+// routes/orders.js - WITH DELIVERY NOTIFICATION AND REVIEW TRACKING
 const express = require("express");
 const router = express.Router();
 const Order = require("../models/Order");
@@ -45,6 +45,7 @@ router.post("/", authMiddleware, async (req, res) => {
       items,
       total,
       status: "Placed",
+      reviewed: false,
     });
     await order.save();
 
@@ -211,20 +212,13 @@ router.patch("/:id/status", authMiddleware, async (req, res) => {
 
     console.log(`   ✅ Order status updated to: ${status}`);
 
-    // ✅ SEND NOTIFICATION IF DELIVERED
-    if (status === "Delivered" && previousStatus !== "Delivered") {
-      console.log(
-        `   📧 Order delivered - notification should be sent to customer`,
-      );
-      // The notification will be handled by the frontend when it receives this response
-    }
-
-    res.json({
+    const response = {
       message: "Order status updated",
       order,
-      // ✅ Include flag for frontend to show review popup
-      showReviewPopup: status === "Delivered",
-    });
+      deliveredNow: status === "Delivered" && previousStatus !== "Delivered",
+    };
+
+    res.json(response);
   } catch (error) {
     console.error(`   ❌ Update order status error:`, error);
     logError("Update order status", error);

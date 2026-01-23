@@ -1,15 +1,37 @@
-const mongoose = require('mongoose');
+// models/Order.js - WITH REVIEWED TRACKING
+const mongoose = require("mongoose");
 
-const orderSchema = new mongoose.Schema({
-  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  items: [{
-    menu_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Menu' },
-    name: String,
-    price: Number,
-    quantity: Number
-  }],
-  total: { type: Number, required: true },
-  status: { type: String, enum: ['Placed', 'Preparing', 'Delivered'], default: 'Placed' }
-}, { timestamps: true });
+const orderItemSchema = new mongoose.Schema({
+  menu_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Menu",
+    required: true,
+  },
+  name: { type: String, required: true },
+  price: { type: Number, required: true },
+  quantity: { type: Number, required: true, min: 1 },
+});
 
-module.exports = mongoose.model('Order', orderSchema);
+const orderSchema = new mongoose.Schema(
+  {
+    user_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    items: [orderItemSchema],
+    total: { type: Number, required: true },
+    status: {
+      type: String,
+      enum: ["Placed", "Preparing", "Delivered"],
+      default: "Placed",
+    },
+    reviewed: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { timestamps: true },
+);
+
+module.exports = mongoose.model("Order", orderSchema);
