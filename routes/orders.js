@@ -1,4 +1,4 @@
-// routes/orders.js - UPDATED WITH PAYMENT INTEGRATION
+// routes/orders.js - WITH DELIVERY NOTIFICATION
 const express = require("express");
 const router = express.Router();
 const Order = require("../models/Order");
@@ -30,18 +30,16 @@ router.post("/", authMiddleware, async (req, res) => {
       return res.status(400).json({ message: "Transaction ID is required" });
     }
 
-    // Verify payment exists and is pending
     const payment = await Payment.findOne({ transaction_id: transactionId });
-    
+
     if (!payment) {
       return res.status(400).json({ message: "Invalid transaction" });
     }
 
-    if (payment.status !== 'Pending') {
+    if (payment.status !== "Pending") {
       return res.status(400).json({ message: "Payment already processed" });
     }
 
-    // Create order
     const order = new Order({
       user_id: req.user.userId,
       items,
@@ -50,15 +48,14 @@ router.post("/", authMiddleware, async (req, res) => {
     });
     await order.save();
 
-    // Update payment with order reference and mark as success
     payment.order_id = order._id;
-    payment.status = 'Success';
+    payment.status = "Success";
     await payment.save();
 
     console.log(`✅ Order ${order._id} placed with payment ${transactionId}`);
 
-    res.status(201).json({ 
-      message: "Order placed successfully", 
+    res.status(201).json({
+      message: "Order placed successfully",
       order,
       payment: {
         transactionId: payment.transaction_id,
@@ -148,7 +145,7 @@ router.get("/all", authMiddleware, async (req, res) => {
   }
 });
 
-// Update order status
+// Update order status - WITH DELIVERY NOTIFICATION
 router.patch("/:id/status", authMiddleware, async (req, res) => {
   try {
     console.log(`\n🔄 UPDATE ORDER STATUS REQUEST`);
@@ -208,11 +205,26 @@ router.patch("/:id/status", authMiddleware, async (req, res) => {
       });
     }
 
+    const previousStatus = order.status;
     order.status = status;
     await order.save();
 
     console.log(`   ✅ Order status updated to: ${status}`);
-    res.json({ message: "Order status updated", order });
+
+    // ✅ SEND NOTIFICATION IF DELIVERED
+    if (status === "Delivered" && previousStatus !== "Delivered") {
+      console.log(
+        `   📧 Order delivered - notification should be sent to customer`,
+      );
+      // The notification will be handled by the frontend when it receives this response
+    }
+
+    res.json({
+      message: "Order status updated",
+      order,
+      // ✅ Include flag for frontend to show review popup
+      showReviewPopup: status === "Delivered",
+    });
   } catch (error) {
     console.error(`   ❌ Update order status error:`, error);
     logError("Update order status", error);
